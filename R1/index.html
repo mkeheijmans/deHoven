@@ -81,6 +81,18 @@
   table.band tr.total td { font-weight: 600; border-top: 2px solid var(--line); }
   .band-scroll { overflow-x: auto; }
   .note { font-size: 12px; margin: 10px 0 0; }
+  .band-sec { padding: 0; }
+  .band-sec > summary { list-style: none; cursor: pointer; padding: 14px 16px; display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+  .band-sec > summary::-webkit-details-marker { display: none; }
+  .band-sec > summary::before { content: '▸'; color: var(--muted); width: 12px; }
+  .band-sec[open] > summary::before { content: '▾'; }
+  .band-sec > summary h2 { margin: 0; }
+  .band-sec > summary .headline { font-size: 13px; }
+  .band-sec > :not(summary) { margin-left: 16px; margin-right: 16px; }
+  .band-sec > :last-child { margin-bottom: 16px; }
+  .band-tools { margin-bottom: 12px; }
+  table.band.levels { margin-top: 20px; }
+  table.band.levels td:nth-child(n+2), table.band.levels th:nth-child(n+2) { text-align: right; }
 
   dialog { border: 0; padding: 0; background: #000; max-width: 96vw; max-height: 96vh; }
   dialog img { display: block; max-width: 96vw; max-height: 96vh; }
@@ -364,11 +376,14 @@
     { key: 'groen', title: 'Bandbreedte inzichten groen', kpis: ['Groen'], area: true,
       note: 'Per knop: verschil in gemiddeld groen tussen de laagste en de hoogste stand van die knop, gemiddeld over ' +
             'alle combinaties van de andere knoppen. m² = procentpunten × totaal plangebied.' },
-    { key: 'parkeren', title: 'Bandbreedte inzichten parkeren', kpis: ['PP Vergroend', 'PP Tekort', 'Dijkzone PP'],
-      note: 'Per indicator en knop: verschil in gemiddeld aantal parkeerplaatsen tussen de laagste en de hoogste stand ' +
-            'van die knop, gemiddeld over alle combinaties van de andere knoppen. Knoppen zonder effect staan er ook in.' },
+    { key: 'parkeren', title: 'Bandbreedte inzichten parkeren', kpis: ['PP Vergroend', 'PP Tekort'] },
+    // levels: extra table with the mean (and range) of each KPI per setting of that input.
+    { key: 'woningen', title: 'Bandbreedte inzichten woningen', kpis: ['Dijkzone Appt', 'Dijkzone PP'], levels: 'Dijkzone' },
   ];
   const LONG_NAME = { PNorm: 'Parkeernorm (%)', Kavel: 'Kavelverkleining (%)', Dijkzone: 'Bebouwing dijkzone' };
+  const KPI_NAME = { 'Dijkzone Appt': 'Extra woningen (dijkzone)', 'Dijkzone PP': 'Extra parkeerplaatsen (dijkzone)' };
+  const KPI_UNIT = { 'Dijkzone Appt': 'woningen' }; // counts default to PP
+  const kname = (k) => KPI_NAME[k.name] || k.name;
   const LIGHT = { bg: '#ffffff', ink: '#1c2127', muted: '#5f6b76', bar: '#1f6feb', axis: '#c3c9d0' };
   const DEFAULT_AREA = 330860; // totaal plangebied in m², ook zichtbaar in de renders van deze run
   const run = location.pathname.split('/').filter(Boolean).pop() || 'run';
@@ -382,7 +397,7 @@
   const m2 = (pp) => (area ? (pp * area) / 100 : null);
 
   // Value text for a KPI: percentages as pp (+ m² when the area is known), counts as whole numbers.
-  const amount = (k, x) => (k.pct ? '+' + nl1(x) + ' pp' + (area ? ' · +' + nl0(m2(x)) + ' m²' : '') : '+' + nl0(x) + ' PP');
+  const amount = (k, x) => (k.pct ? '+' + nl1(x) + ' pp' + (area ? ' · +' + nl0(m2(x)) + ' m²' : '') : '+' + nl0(x) + ' ' + (KPI_UNIT[k.name] || 'PP'));
   const level = (k, x) => (k.pct ? nl1(x) + '%' : nl0(x));
 
   function bandItems(k) {
@@ -410,7 +425,7 @@
     let y = 6, body = '';
     for (const g of groups) {
       if (multi) {
-        body += `<text x="0" y="${y + 20}" font-size="15" font-weight="700" fill="${pal.ink}">${esc(g.k.name)}</text>`;
+        body += `<text x="0" y="${y + 20}" font-size="15" font-weight="700" fill="${pal.ink}">${esc(kname(g.k))}</text>`;
         y += headH;
       }
       const y0 = y;
@@ -434,16 +449,39 @@
   }
 
   // Groen (one KPI): knop / van→naar / pp / m² / aandeel. Parkeren (several): indicator / knop / van→naar / laag→hoog / bandbreedte.
-  function bandTableHTML(groups, inline) {
-    const multi = groups.length > 1;
+  // Inline styles only for the clipboard copy, so PowerPoint keeps the formatting; on the page CSS does it.
+  function tableKit(inline, firstNum) {
     const st = inline ? { t: ' style="border-collapse:collapse;font-family:Segoe UI,Arial,sans-serif;font-size:14px"',
       th: ' style="text-align:left;padding:6px 12px;border-bottom:2px solid #1c2127"',
       td: ' style="text-align:left;padding:6px 12px;border-bottom:1px solid #dde2e7"',
       tot: ' style="text-align:left;padding:6px 12px;font-weight:bold;border-top:2px solid #1c2127;border-bottom:1px solid #dde2e7"' }
       : { t: '', th: '', td: '', tot: '' };
     const cell = (tag, attr, v, right) => `<${tag}${right && inline ? attr.replace('text-align:left', 'text-align:right') : attr}>${esc(v)}</${tag}>`;
-    const firstNum = multi ? 3 : 2;
     const row = (tag, attr, cells, cls) => `<tr${cls ? ` class="${cls}"` : ''}>` + cells.map((x, j) => cell(tag, attr, x, j >= firstNum)).join('') + '</tr>';
+    return { st, row };
+  }
+
+  // Per setting of one input: mean of each KPI over the other inputs, with the range when it varies.
+  function levelsTableHTML(dname, ks, inline) {
+    const d = inputs.find((x) => x.name === dname);
+    if (!d) return '';
+    const { st, row } = tableKit(inline, 1);
+    let h = `<table${st.t}><thead>` + row('th', st.th, [LONG_NAME[d.name] || d.name].concat(ks.map(kname))) + '</thead><tbody>';
+    for (const v of d.uniq) {
+      const sub = rows.filter((r) => r.num[d.i] === v);
+      h += row('td', st.td, [fmt(d, v)].concat(ks.map((k) => {
+        const xs = sub.map((r) => r.num[k.i]), lo = Math.min(...xs), hi = Math.max(...xs);
+        const m = xs.reduce((a, b) => a + b, 0) / xs.length;
+        return lo === hi ? level(k, m) : level(k, m) + ' (' + level(k, lo) + '–' + level(k, hi) + ')';
+      })));
+    }
+    return h + '</tbody></table>';
+  }
+
+  function bandTableHTML(groups, inline) {
+    const multi = groups.length > 1;
+    const firstNum = multi ? 3 : 2;
+    const { st, row } = tableKit(inline, firstNum);
     let head;
     if (multi) head = ['Indicator', 'Knop', 'Van → naar', 'Laag → hoog', 'Bandbreedte'];
     else head = ['Knop', 'Van → naar (meer ' + groups[0].k.name.toLowerCase() + ')', groups[0].k.name + ' (pp)']
@@ -454,11 +492,11 @@
       for (const it of g.items) {
         const vt = it.from + ' → ' + it.to;
         h += row('td', st.td, multi
-          ? [k.name, it.name, it.span > 0 ? vt : '–', it.span > 0 ? level(k, it.lo) + ' → ' + level(k, it.hi) : level(k, it.lo), it.span > 0 ? '+' + nl0(it.span) : 'geen effect']
+          ? [kname(k), it.name, it.span > 0 ? vt : '–', it.span > 0 ? level(k, it.lo) + ' → ' + level(k, it.hi) : level(k, it.lo), it.span > 0 ? '+' + nl0(it.span) : 'geen effect']
           : [it.name, vt, '+' + nl1(it.span)].concat(area ? ['+' + nl0(m2(it.span))] : [], [(span ? Math.round((it.span / span) * 100) : 0) + '%']));
       }
       h += row('td', st.tot, multi
-        ? [k.name, 'Alle varianten', '', level(k, k.min) + ' → ' + level(k, k.max), '+' + nl0(span)]
+        ? [kname(k), 'Alle varianten', '', level(k, k.min) + ' → ' + level(k, k.max), '+' + nl0(span)]
         : ['Totale bandbreedte (alle varianten)', nl1(k.min) + '% → ' + nl1(k.max) + '%', '+' + nl1(span)]
           .concat(area ? ['+' + nl0(m2(span))] : [], ['100%']), 'total');
     }
@@ -503,22 +541,33 @@
   for (const b of BANDS) {
     const ks = b.kpis.map((n) => outs.find((d) => d.name === n)).filter(Boolean);
     if (!ks.length || !inputs.length) continue;
-    const sec = document.createElement('div');
-    sec.className = 'card section';
+    // Collapsed by default; the open/closed state is remembered per viewer.
+    const sec = document.createElement('details');
+    sec.className = 'card section band-sec';
+    const openKey = 'band-open:' + location.pathname + ':' + b.key;
+    try { sec.open = localStorage.getItem(openKey) === '1'; } catch (e) {}
+    sec.addEventListener('toggle', () => { try { localStorage.setItem(openKey, sec.open ? '1' : '0'); } catch (e) {} });
     sec.innerHTML =
-      `<div class="pc-head"><h2>${esc(b.title)}</h2><span class="tools">` +
+      `<summary><h2>${esc(b.title)}</h2><span class="muted headline" data-r="headline"></span></summary>` +
+      '<div class="tools band-tools">' +
       (b.area ? '<label class="muted">Totaal plangebied <input data-r="area" type="number" min="0" step="1" placeholder="m²"> m²</label>' : '') +
       '<button class="btn" data-r="svg">Grafiek als SVG</button><button class="btn" data-r="png">Grafiek als PNG</button>' +
-      '<button class="btn" data-r="copy">Kopieer tabel</button></span></div>' +
+      '<button class="btn" data-r="copy">Kopieer tabel</button></div>' +
       '<div class="kpis" data-r="kpis"></div><div class="band-chart" data-r="chart"></div>' +
       '<div class="band-scroll"><table class="band" data-r="table"></table></div>' +
-      `<p class="muted note">${esc(b.note)} "Kopieer tabel" plakt als bewerkbare tabel in PowerPoint; de grafiek als SVG blijft scherp op elk formaat.</p>`;
+      (b.levels ? '<div class="band-scroll"><table class="band levels" data-r="levels"></table></div>' : '') +
+      (b.note ? `<p class="muted note">${esc(b.note)}</p>` : '');
     $('bands').appendChild(sec);
     const q = (r) => sec.querySelector(`[data-r="${r}"]`);
     const groups = () => ks.map((k) => ({ k, items: bandItems(k) }));
     const file = (ext) => `bandbreedte-${b.key}-${run}.${ext}`;
 
     const render = () => {
+      const top = groups()[0], best = top.items[0];
+      q('headline').textContent = best.span > 0
+        ? 'Grootste knop' + (ks.length > 1 ? ' voor ' + kname(top.k) : '') + ': ' + best.name + ' ' + amount(top.k, best.span)
+        : '';
+      if (b.levels) q('levels').innerHTML = levelsTableHTML(b.levels, ks, false).replace(/^<table>|<\/table>$/g, '');
       const tile = (lbl, big, small) => `<div class="kpi"><span class="muted">${esc(lbl)}</span><b>${big}</b><span class="muted">${small || '&nbsp;'}</span></div>`;
       if (ks.length === 1 && ks[0].pct) {
         const k = ks[0], span = k.max - k.min;
@@ -526,7 +575,7 @@
           tile(k.name + ', hoogste variant', nl1(k.max) + '%', area && nl0(m2(k.max)) + ' m²') +
           tile('Maximale winst', '+' + nl1(span) + ' pp', area && '+' + nl0(m2(span)) + ' m²');
       } else {
-        q('kpis').innerHTML = ks.map((k) => tile(k.name, level(k, k.min) + ' – ' + level(k, k.max), 'bereik over alle varianten')).join('');
+        q('kpis').innerHTML = ks.map((k) => tile(kname(k), level(k, k.min) + ' – ' + level(k, k.max), 'bereik over alle varianten')).join('');
       }
       const cs = getComputedStyle(document.documentElement), v = (n) => cs.getPropertyValue(n).trim();
       q('chart').innerHTML = bandSVG(groups(), { ink: v('--ink'), muted: v('--muted'), bar: v('--accent'), axis: v('--line') }).s;
@@ -545,7 +594,8 @@
       };
       img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(s);
     });
-    q('copy').addEventListener('click', (ev) => copyHTML(bandTableHTML(groups(), true), ev.currentTarget));
+    q('copy').addEventListener('click', (ev) => copyHTML(bandTableHTML(groups(), true) +
+      (b.levels ? '<br>' + levelsTableHTML(b.levels, ks, true) : ''), ev.currentTarget));
     if (b.area) {
       const inp = q('area');
       if (area) inp.value = area;
