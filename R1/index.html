@@ -95,7 +95,7 @@
   <div class="card">
     <div class="pc-head">
       <h2>Alle varianten</h2>
-      <span class="muted">Sleep verticaal over een as om te filteren · klik op een as om het filter te wissen
+      <span class="muted">Sleep verticaal over een as om te filteren · sleep het filter om het te verschuiven · klik om te wissen
         <button class="btn" id="reset">Wis filters</button></span>
     </div>
     <div class="pc-scroll"><svg id="pc"></svg></div>
@@ -263,23 +263,35 @@
     return pt.matrixTransform(svg.getScreenCTM().inverse()).y;
   }
 
+  // Drag outside the range draws a new one; drag inside it moves it; a click without dragging clears it.
   function bindBrush(hit, d) {
-    let y0 = null;
+    let y0 = null, moveFrom = null; // moveFrom = [top, bottom] in px when moving an existing range
+    const rangePx = () => brushes[d.i] && [geom.y(d, brushes[d.i][1]), geom.y(d, brushes[d.i][0])];
+    const inside = (y) => { const r = rangePx(); return r && y >= r[0] && y <= r[1]; };
     hit.addEventListener('pointerdown', (ev) => {
       y0 = svgY(ev);
+      moveFrom = inside(y0) ? rangePx() : null;
       hit.setPointerCapture(ev.pointerId);
     });
     hit.addEventListener('pointermove', (ev) => {
-      if (y0 === null) return;
       const y1 = svgY(ev);
+      if (y0 === null) { hit.style.cursor = inside(y1) ? 'move' : ''; return; }
       if (Math.abs(y1 - y0) < 3) return;
-      const a = geom.inv(d, Math.max(y0, y1)), b = geom.inv(d, Math.min(y0, y1));
-      brushes[d.i] = [Math.min(a, b), Math.max(a, b)];
+      const lo = geom.m.t, hi = geom.H - geom.m.b;
+      let top, bot;
+      if (moveFrom) {
+        const dy = Math.min(Math.max(y1 - y0, lo - moveFrom[0]), hi - moveFrom[1]);
+        top = moveFrom[0] + dy; bot = moveFrom[1] + dy;
+      } else {
+        const c = (v) => Math.min(Math.max(v, lo), hi);
+        top = c(Math.min(y0, y1)); bot = c(Math.max(y0, y1));
+      }
+      brushes[d.i] = [geom.inv(d, bot), geom.inv(d, top)];
       applyFilter();
     });
     hit.addEventListener('pointerup', (ev) => {
       if (y0 !== null && Math.abs(svgY(ev) - y0) < 3) { delete brushes[d.i]; applyFilter(); }
-      y0 = null;
+      y0 = moveFrom = null;
     });
   }
 
