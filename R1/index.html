@@ -1,0 +1,338 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Varianten R1</title>
+<style>
+  :root {
+    --bg: #f4f5f7; --panel: #ffffff; --ink: #1c2127; --muted: #5f6b76;
+    --line: #dde2e7; --accent: #1f6feb; --dim: #cfd6dd; --sel: #e8590c;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #111418; --panel: #1a1f25; --ink: #e6edf3; --muted: #9aa7b3;
+      --line: #2d343c; --accent: #58a6ff; --dim: #353d46; --sel: #ff8a3d;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  .wrap { max-width: 1400px; margin: 0 auto; padding: 20px 16px 48px; }
+  header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+  h1 { font-size: 20px; margin: 0; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 12px; font-weight: 600; }
+  .muted { color: var(--muted); }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; }
+
+  .top { display: grid; grid-template-columns: 300px 1fr; gap: 16px; margin-bottom: 16px; align-items: start; }
+  @media (max-width: 860px) { .top { grid-template-columns: 1fr; } .viewer { order: -1; } }
+
+  .slider { margin-bottom: 16px; }
+  .slider label { display: flex; justify-content: space-between; font-weight: 600; margin-bottom: 4px; }
+  .slider output { font-variant-numeric: tabular-nums; color: var(--accent); }
+  .slider input { width: 100%; accent-color: var(--accent); }
+  .ticks { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); }
+
+  table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  td { padding: 5px 0; border-top: 1px solid var(--line); }
+  td:last-child { text-align: right; font-weight: 600; }
+
+  .viewer { padding: 0; overflow: hidden; display: flex; flex-direction: column; }
+  .viewer img { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: contain; background: #000; cursor: zoom-in; }
+  .viewer .cap { padding: 10px 16px; display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+
+  .pc-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+  .pc-scroll { overflow-x: auto; }
+  #pc { display: block; min-width: 760px; width: 100%; height: 340px; user-select: none; touch-action: none; }
+  #pc .ln { fill: none; stroke: var(--accent); stroke-width: 1.2; stroke-opacity: .35; }
+  #pc .ln.off { stroke: var(--dim); stroke-opacity: .5; }
+  #pc .ln.sel { stroke: var(--sel); stroke-width: 3; stroke-opacity: 1; }
+  #pc .axis { stroke: var(--muted); stroke-width: 1; }
+  #pc text { fill: var(--ink); font-size: 11px; }
+  #pc .tick { fill: var(--muted); font-size: 10px; }
+  #pc .brush { fill: var(--accent); fill-opacity: .18; stroke: var(--accent); }
+  #pc .hit { fill: transparent; cursor: ns-resize; }
+
+  button { font: inherit; color: inherit; }
+  .btn { background: none; border: 1px solid var(--line); border-radius: 6px; padding: 4px 10px; cursor: pointer; }
+  .btn:hover { border-color: var(--accent); }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; margin-top: 16px; }
+  .thumb { padding: 0; border: 2px solid transparent; border-radius: 8px; overflow: hidden; background: var(--panel); cursor: pointer; text-align: left; }
+  .thumb.sel { border-color: var(--sel); }
+  .thumb img { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: cover; background: var(--line); }
+  .thumb span { display: block; padding: 6px 8px; font-size: 12px; color: var(--muted); }
+
+  dialog { border: 0; padding: 0; background: #000; max-width: 96vw; max-height: 96vh; }
+  dialog img { display: block; max-width: 96vw; max-height: 96vh; }
+  dialog::backdrop { background: rgba(0,0,0,.8); }
+  .err { color: var(--sel); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Variantenstudie — R1</h1>
+    <span class="muted" id="count"></span>
+  </header>
+
+  <div class="top">
+    <div class="card">
+      <h2>Invoer</h2>
+      <div id="sliders"></div>
+      <h2 style="margin-top:20px">Resultaat</h2>
+      <table id="outputs"></table>
+    </div>
+    <div class="card viewer">
+      <img id="main" alt="Geselecteerde variant">
+      <div class="cap"><strong id="title"></strong><span class="muted">Klik op de afbeelding om te vergroten</span></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="pc-head">
+      <h2>Alle varianten</h2>
+      <span class="muted">Sleep verticaal over een as om te filteren · klik op een as om het filter te wissen
+        <button class="btn" id="reset">Wis filters</button></span>
+    </div>
+    <div class="pc-scroll"><svg id="pc"></svg></div>
+  </div>
+
+  <div class="grid" id="grid"></div>
+</div>
+
+<dialog id="zoom"><img alt=""></dialog>
+
+<script>
+(async function () {
+  const $ = (id) => document.getElementById(id);
+  const NS = 'http://www.w3.org/2000/svg';
+
+  // --- data ----------------------------------------------------------------
+  let text;
+  try {
+    const res = await fetch('data.csv', { cache: 'no-cache' });
+    if (!res.ok) throw new Error(res.status + ' ' + res.statusText);
+    text = await res.text();
+  } catch (e) {
+    $('count').innerHTML = '<span class="err">Kon data.csv niet laden (' + e.message +
+      '). Open deze pagina via GitHub Pages of een lokale webserver, niet als bestand.</span>';
+    return;
+  }
+
+  const lines = text.trim().split(/\r?\n/);
+  const head = lines[0].split(',');
+  const cols = head.map((h, i) => {
+    const m = h.match(/^(in|out):(.*)$/);
+    return { i, kind: m ? m[1] : (h.trim() === 'img' ? 'img' : 'other'), name: m ? m[2].trim() : h.trim() };
+  });
+  const imgCol = cols.find((c) => c.kind === 'img');
+  const dims = cols.filter((c) => c.kind === 'in' || c.kind === 'out');
+  const inputs = dims.filter((c) => c.kind === 'in');
+  const outs = dims.filter((c) => c.kind === 'out');
+
+  const rows = lines.slice(1).map((l, idx) => {
+    const raw = l.split(',').map((s) => s.trim());
+    return {
+      idx, raw,
+      num: raw.map((v) => parseFloat(v.replace('%', ''))),
+      img: imgCol ? raw[imgCol.i] : null,
+    };
+  });
+
+  for (const d of dims) {
+    // Text columns (e.g. "Sociaal 3v") become categories, ordered by first appearance.
+    if (rows.some((r) => r.raw[d.i] !== '' && isNaN(Number(r.raw[d.i].replace('%', ''))))) {
+      d.cats = [...new Set(rows.map((r) => r.raw[d.i]))];
+      rows.forEach((r) => { r.num[d.i] = d.cats.indexOf(r.raw[d.i]); });
+    }
+    const vals = rows.map((r) => r.num[d.i]).filter((v) => !isNaN(v));
+    d.min = Math.min(...vals);
+    d.max = Math.max(...vals);
+    d.pct = rows.some((r) => r.raw[d.i].endsWith('%'));
+    d.uniq = [...new Set(vals)].sort((a, b) => a - b);
+  }
+
+  const fmt = (d, v) => (d.cats ? d.cats[Math.round(v)] : d.pct ? +v.toFixed(1) + '%' : +v.toFixed(2) + '');
+  const imgUrl = (r) => encodeURIComponent(r.img);
+  const label = (r) => inputs.map((d) => d.name + ' ' + r.raw[d.i]).join(' · ');
+
+  // --- state ---------------------------------------------------------------
+  let sel = rows[0];
+  const brushes = {}; // dim index -> [lo, hi] in data units
+  const passes = (r) => Object.entries(brushes).every(([i, [lo, hi]]) => r.num[i] >= lo && r.num[i] <= hi);
+
+  // --- sliders -------------------------------------------------------------
+  for (const d of inputs) {
+    const el = document.createElement('div');
+    el.className = 'slider';
+    el.innerHTML =
+      `<label>${d.name} <output></output></label>` +
+      `<input type="range" min="0" max="${d.uniq.length - 1}" step="1">` +
+      `<div class="ticks"><span>${fmt(d, d.min)}</span><span>${fmt(d, d.max)}</span></div>`;
+    d.input = el.querySelector('input');
+    d.output = el.querySelector('output');
+    d.input.addEventListener('input', () => {
+      const want = inputs.map((x) => x.uniq[+x.input.value]);
+      const hit = rows.find((r) => inputs.every((x, k) => r.num[x.i] === want[k]));
+      if (hit) select(hit);
+      else d.output.textContent = fmt(d, want[inputs.indexOf(d)]) + ' (geen variant)';
+    });
+    $('sliders').appendChild(el);
+  }
+
+  // --- selection -----------------------------------------------------------
+  function select(r, opts = {}) {
+    sel = r;
+    $('main').src = imgUrl(r);
+    $('title').textContent = label(r);
+    for (const d of inputs) {
+      d.input.value = d.uniq.indexOf(r.num[d.i]);
+      d.output.textContent = r.raw[d.i];
+    }
+    $('outputs').innerHTML = outs.map((d) => `<tr><td>${d.name}</td><td>${r.raw[d.i]}</td></tr>`).join('');
+    paths.forEach((p, k) => p.classList.toggle('sel', k === r.idx));
+    if (paths[r.idx]) paths[r.idx].parentNode.appendChild(paths[r.idx]); // bring to front
+    document.querySelectorAll('.thumb').forEach((t) => t.classList.toggle('sel', +t.dataset.idx === r.idx));
+    history.replaceState(null, '', '#' + inputs.map((d) => encodeURIComponent(d.name) + '=' + encodeURIComponent(r.raw[d.i])).join('&'));
+    if (opts.scroll) document.querySelector('.top').scrollIntoView({ behavior: 'smooth' });
+  }
+
+  // --- parallel coordinates ------------------------------------------------
+  const svg = $('pc');
+  let paths = [];
+  let geom = null;
+
+  function draw() {
+    const W = svg.clientWidth, H = svg.clientHeight;
+    const m = { t: 44, r: 50, b: 24, l: 50 };
+    const step = (W - m.l - m.r) / Math.max(1, dims.length - 1);
+    const y = (d, v) => (d.max === d.min ? (m.t + H - m.b) / 2 : m.t + (1 - (v - d.min) / (d.max - d.min)) * (H - m.t - m.b));
+    const inv = (d, py) => d.min + (1 - (py - m.t) / (H - m.t - m.b)) * (d.max - d.min);
+    geom = { m, H, y, inv, x: (k) => m.l + k * step };
+    svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+    svg.innerHTML = '';
+
+    const gl = document.createElementNS(NS, 'g');
+    paths = rows.map((r) => {
+      const p = document.createElementNS(NS, 'path');
+      p.setAttribute('d', dims.map((d, k) => (k ? 'L' : 'M') + geom.x(k) + ',' + y(d, r.num[d.i])).join(''));
+      p.setAttribute('class', 'ln');
+      gl.appendChild(p);
+      return p;
+    });
+    svg.appendChild(gl);
+
+    dims.forEach((d, k) => {
+      const x = geom.x(k);
+      const g = document.createElementNS(NS, 'g');
+      g.innerHTML =
+        `<line class="axis" x1="${x}" x2="${x}" y1="${m.t}" y2="${H - m.b}"/>` +
+        `<text x="${x}" y="${m.t - 24}" text-anchor="middle" font-weight="600">${d.name}</text>` +
+        `<text x="${x}" y="${m.t - 10}" text-anchor="middle" class="tick">${d.kind === 'in' ? 'invoer' : 'uitvoer'}</text>`;
+      const ticks = (d.kind === 'in' || d.cats) && d.uniq.length <= 12 ? d.uniq : [d.min, d.max];
+      for (const v of ticks) {
+        g.innerHTML += `<text class="tick" x="${x + 5}" y="${y(d, v) + 3}">${fmt(d, v)}</text>`;
+      }
+      const br = document.createElementNS(NS, 'rect');
+      br.setAttribute('class', 'brush');
+      br.setAttribute('x', x - 8);
+      br.setAttribute('width', 16);
+      g.appendChild(br);
+      const hit = document.createElementNS(NS, 'rect');
+      hit.setAttribute('class', 'hit');
+      hit.setAttribute('x', x - 14);
+      hit.setAttribute('width', 28);
+      hit.setAttribute('y', m.t - 6);
+      hit.setAttribute('height', H - m.t - m.b + 12);
+      g.appendChild(hit);
+      d.brushRect = br;
+      bindBrush(hit, d);
+      svg.appendChild(g);
+    });
+    applyFilter();
+    select(sel);
+  }
+
+  function svgY(ev) {
+    const pt = svg.createSVGPoint();
+    pt.x = ev.clientX; pt.y = ev.clientY;
+    return pt.matrixTransform(svg.getScreenCTM().inverse()).y;
+  }
+
+  function bindBrush(hit, d) {
+    let y0 = null;
+    hit.addEventListener('pointerdown', (ev) => {
+      y0 = svgY(ev);
+      hit.setPointerCapture(ev.pointerId);
+    });
+    hit.addEventListener('pointermove', (ev) => {
+      if (y0 === null) return;
+      const y1 = svgY(ev);
+      if (Math.abs(y1 - y0) < 3) return;
+      const a = geom.inv(d, Math.max(y0, y1)), b = geom.inv(d, Math.min(y0, y1));
+      brushes[d.i] = [Math.min(a, b), Math.max(a, b)];
+      applyFilter();
+    });
+    hit.addEventListener('pointerup', (ev) => {
+      if (y0 !== null && Math.abs(svgY(ev) - y0) < 3) { delete brushes[d.i]; applyFilter(); }
+      y0 = null;
+    });
+  }
+
+  function applyFilter() {
+    for (const d of dims) {
+      const b = brushes[d.i];
+      if (!b || d.max === d.min) { d.brushRect.setAttribute('height', 0); continue; }
+      const top = geom.y(d, b[1]), bot = geom.y(d, b[0]);
+      d.brushRect.setAttribute('y', top);
+      d.brushRect.setAttribute('height', Math.max(2, bot - top));
+    }
+    const on = rows.filter(passes);
+    rows.forEach((r) => paths[r.idx].classList.toggle('off', !passes(r)));
+    $('count').textContent = on.length + ' van ' + rows.length + ' varianten';
+    renderGrid(on);
+  }
+
+  // --- thumbnail grid ------------------------------------------------------
+  let gridKey = '';
+  function renderGrid(on) {
+    const key = on.map((r) => r.idx).join(',');
+    if (key === gridKey) return;
+    gridKey = key;
+    $('grid').innerHTML = on.map((r) =>
+      `<button class="thumb${r === sel ? ' sel' : ''}" data-idx="${r.idx}">` +
+      `<img loading="lazy" decoding="async" src="${imgUrl(r)}" alt="">` +
+      `<span>${label(r)}</span></button>`).join('');
+  }
+  $('grid').addEventListener('click', (ev) => {
+    const t = ev.target.closest('.thumb');
+    if (t) select(rows[+t.dataset.idx], { scroll: true });
+  });
+
+  $('reset').addEventListener('click', () => {
+    for (const k in brushes) delete brushes[k];
+    applyFilter();
+  });
+
+  $('main').addEventListener('click', () => {
+    $('zoom').querySelector('img').src = $('main').src;
+    $('zoom').showModal();
+  });
+  $('zoom').addEventListener('click', () => $('zoom').close());
+
+  // --- start: restore selection from URL hash --------------------------------
+  const params = new URLSearchParams(location.hash.slice(1));
+  const fromHash = rows.find((r) => inputs.every((d) => params.get(d.name) === r.raw[d.i]));
+  if (fromHash) sel = fromHash;
+
+  let t;
+  window.addEventListener('resize', () => { clearTimeout(t); t = setTimeout(draw, 150); });
+  draw();
+})();
+</script>
+</body>
+</html>
