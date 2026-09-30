@@ -486,59 +486,57 @@
     },
   };
 
-  // ---- view 'steps': what each step of one input adds (parkeernorm 100 → 75 → … → 0) ----
+  // ---- view 'steps': absolute values per setting of one input (parkeernorm 100 → 75 → … → 0) ----
+  // kpis[0] is drawn as the main bar, kpis[1] as a second bar only where it is non-zero (e.g. a shortage).
   function stepData(b, ks) {
     const d = col(b.by), g = b.extra && col(b.extra);
     const lv = b.descending ? [...d.uniq].reverse() : d.uniq;
     const at = (k, v) => meanWhere(k, [d, v]);
-    return lv.slice(1).map((v, j) => {
-      const from = lv[j], s = { label: fmt(d, from) + ' → ' + fmt(d, v) };
-      s.delta = ks.map((k) => at(k, v) - at(k, from));
-      s.cum = ks.map((k) => at(k, v) - at(k, lv[0]));
-      s.before = ks.map((k) => at(k, from));
-      s.after = ks.map((k) => at(k, v));
-      if (g) { s.g = at(g, v) - at(g, from); s.gcum = at(g, v) - at(g, lv[0]); }
-      return s;
-    });
+    return lv.map((v, j) => ({
+      label: fmt(d, v) + (d.name === 'PNorm' ? '%' : ''),
+      vals: ks.map((k) => at(k, v)),
+      step: j ? at(ks[0], v) - at(ks[0], lv[j - 1]) : null,
+      g: g ? at(g, v) - at(g, lv[0]) : null, // gain relative to the first setting
+    }));
   }
   const stepsView = {
     headline(b, ks) {
-      const st = stepData(b, ks), incs = st.map((s) => s.delta[0]);
-      const gone = st.find((s) => s.before[1] > 0 && s.after[1] === 0);
-      return `Per stap ${nl0(Math.min(...incs))}–${nl0(Math.max(...incs))} PP vergroend` +
-        (gone ? ` · tekort (${nl0(gone.before[1])} PP) verdwijnt bij ${gone.label}` : '');
+      const st = stepData(b, ks), first = st[0], last = st[st.length - 1];
+      const short = st.filter((s) => s.vals[1] > 0);
+      return `${first.label} → ${last.label}: ${nl0(first.vals[0])} → ${nl0(last.vals[0])} PP vergroend` +
+        (area && last.g ? ` (${sgn(m2(last.g), nl0)} m² groen)` : '') +
+        (short.length ? ` · tekort alleen bij ${short.map((s) => s.label).join(', ')}` : '');
     },
     chart(b, ks, pal) {
-      const st = stepData(b, ks), g = b.extra && col(b.extra);
-      const W = 720, rowH = 54, labW = 190, valW = 330, bw = W - labW - valW, top = 28;
-      const max = Math.max(...st.map((s) => Math.abs(s.delta[0]))) || 1;
-      let y = top, body = legend(pal, [[pal.bar, 'Extra ' + kname(ks[0]) + ' in deze stap']]);
+      const st = stepData(b, ks), name = (LONG_NAME[b.by] || b.by).replace(/ \(%\)$/, '');
+      const W = 720, rowH = 58, labW = 190, valW = 170, bw = W - labW - valW, top = 30;
+      const max = Math.max(...st.flatMap((s) => s.vals)) || 1;
+      const len = (x) => (x > 0 ? Math.max(6, Math.round((x / max) * bw * 10) / 10) : 0);
+      let y = top, body = legend(pal, [[pal.bar, kname(ks[0])], [pal.bar2, kname(ks[1])]]);
       for (const s of st) {
-        const w = Math.max(6, Math.round((Math.abs(s.delta[0]) / max) * bw * 10) / 10);
-        const parts = [sgn(s.delta[0], nl0) + ' PP vergroend'];
-        if (Math.round(s.delta[1]) !== 0) parts.push('tekort ' + nl0(s.before[1]) + ' → ' + nl0(s.after[1]));
-        if (g) parts.push(sgn(s.g, nl1) + ' pp groen' + (area ? ' (' + sgn(m2(s.g), nl0) + ' m²)' : ''));
-        const cum = 'totaal ' + sgn(s.cum[0], nl0) + ' PP' + (g && area ? ' · ' + sgn(m2(s.gcum), nl0) + ' m²' : '');
-        body += txt(0, y + 20, 14, pal.ink, (LONG_NAME[b.by] || b.by).replace(/ \(%\)$/, '') + ' ' + s.label, true) +
-                txt(0, y + 38, 12, pal.muted, cum) + barPath(labW, y + 14, w, 22, pal.bar) +
-                txt(labW + w + 10, y + 30, 13, pal.ink, parts.join(' · '), true);
+        const sub = s.g ? sgn(s.g, nl1) + ' pp groen' + (area ? ' · ' + sgn(m2(s.g), nl0) + ' m²' : '') : 'uitgangssituatie';
+        body += txt(0, y + 18, 14, pal.ink, name + ' ' + s.label, true) + txt(0, y + 36, 12, pal.muted, sub);
+        const w = len(s.vals[0]);
+        if (w) body += barPath(labW, y + 6, w, 18, pal.bar);
+        body += txt(labW + w + 8, y + 20, 13, s.vals[0] > 0 ? pal.ink : pal.muted, nl0(s.vals[0]) + ' ' + kname(ks[0]), true);
+        if (s.vals[1] > 0) {
+          const w2 = len(s.vals[1]);
+          body += barPath(labW, y + 30, w2, 14, pal.bar2) + txt(labW + w2 + 8, y + 42, 13, pal.ink, nl0(s.vals[1]) + ' ' + kname(ks[1]), true);
+        }
         y += rowH;
       }
-      body += `<line x1="${labW}" x2="${labW}" y1="${top}" y2="${y - 6}" stroke="${pal.axis}"/>`;
-      return { s: svgWrap(W, y + 6, pal, body), W, H: y + 6 };
+      body += `<line x1="${labW}" x2="${labW}" y1="${top}" y2="${y - 8}" stroke="${pal.axis}"/>`;
+      return { s: svgWrap(W, y + 4, pal, body), W, H: y + 4 };
     },
     table(b, ks, inline) {
       const st = stepData(b, ks), g = b.extra && col(b.extra), { st: sty, row, open, close } = tableKit(inline, 1);
-      let h = open(['Stap ' + (LONG_NAME[b.by] || b.by).toLowerCase(), 'Extra PP vergroend', 'Cumulatief vergroend', kname(ks[1])]
-        .concat(g ? ['Extra groen (pp)'] : [], g && area ? ['Extra groen (m²)', 'm² groen per vergroende PP'] : []));
+      let h = open([LONG_NAME[b.by] || b.by, kname(ks[0]), 'Erbij t.o.v. vorige stap', kname(ks[1])]
+        .concat(g ? ['Extra groen t.o.v. ' + st[0].label + ' (pp)'] : [], g && area ? ['Extra groen (m²)', 'm² groen per vergroende PP'] : []));
       for (const s of st) {
-        h += row('td', sty.td, [s.label, sgn(s.delta[0], nl0), sgn(s.cum[0], nl0), nl0(s.before[1]) + ' → ' + nl0(s.after[1])]
-          .concat(g ? [sgn(s.g, nl1)] : [], g && area ? [sgn(m2(s.g), nl0), s.delta[0] ? nl1(m2(s.g) / s.delta[0]) : '–'] : []));
+        const perPP = s.vals[0] - st[0].vals[0];
+        h += row('td', sty.td, [s.label, nl0(s.vals[0]), s.step === null ? '–' : sgn(s.step, nl0), nl0(s.vals[1])]
+          .concat(g ? [s.g ? sgn(s.g, nl1) : '–'] : [], g && area ? [s.g ? sgn(m2(s.g), nl0) : '–', perPP ? nl1(m2(s.g) / perPP) : '–'] : []));
       }
-      const last = st[st.length - 1];
-      h += row('td', sty.tot, ['Totaal ' + st[0].label.split(' → ')[0] + ' → ' + last.label.split(' → ')[1], sgn(last.cum[0], nl0), '',
-        nl0(st[0].before[1]) + ' → ' + nl0(last.after[1])]
-        .concat(g ? [sgn(last.gcum, nl1)] : [], g && area ? [sgn(m2(last.gcum), nl0), last.cum[0] ? nl1(m2(last.gcum) / last.cum[0]) : '–'] : []), 'total');
       return h + close;
     },
   };
