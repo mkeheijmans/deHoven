@@ -23,6 +23,8 @@
   .wrap { max-width: 1400px; margin: 0 auto; padding: 20px 16px 48px; }
   header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
   h1 { font-size: 20px; margin: 0; }
+  .brand { color: var(--ink); font-size: 26px; font-weight: 700; letter-spacing: -.01em; margin: 0 0 14px; padding-bottom: 12px; border-bottom: 1px solid var(--line); }
+  .brand span { color: var(--muted); font-weight: 400; }
   h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 12px; font-weight: 600; }
   .muted { color: var(--muted); }
   .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; }
@@ -101,6 +103,7 @@
 </head>
 <body>
 <div class="wrap">
+  <p class="brand">Heijmans Wonen: <span>Inzichten Platform</span></p>
   <header>
     <h1>de Hoven Noord: Sprint 1 (R1)</h1>
     <span class="muted" id="count"></span>
