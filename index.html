@@ -1,1 +1,47 @@
-
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Variantenstudie</title>
+<style>
+  :root { --bg: #f4f5f7; --panel: #ffffff; --ink: #1c2127; --muted: #5f6b76; --line: #dde2e7; --accent: #1f6feb; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #111418; --panel: #1a1f25; --ink: #e6edf3; --muted: #9aa7b3; --line: #2d343c; --accent: #58a6ff; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  .wrap { max-width: 720px; margin: 0 auto; padding: 32px 16px; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  p { color: var(--muted); margin: 0 0 20px; }
+  ul { list-style: none; padding: 0; margin: 0; display: grid; gap: 8px; }
+  a { display: flex; justify-content: space-between; padding: 14px 16px; background: var(--panel); border: 1px solid var(--line);
+      border-radius: 10px; color: var(--ink); text-decoration: none; font-weight: 600; }
+  a:hover { border-color: var(--accent); }
+  a span { color: var(--muted); font-weight: 400; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Variantenstudie</h1>
+  <p>Kies een run.</p>
+  <ul id="runs"><li><a href="R1/">R1 <span>→</span></a></li></ul>
+</div>
+<script>
+  // Lists every run folder (R1, R2, ...) in the repo; the static R1 link above is the fallback.
+  fetch('https://api.github.com/repos/mkeheijmans/deHoven/contents/')
+    .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
+    .then((items) => {
+      const runs = items
+        .filter((it) => it.type === 'dir' && /^R\d+$/i.test(it.name))
+        .map((it) => it.name)
+        .sort((a, b) => parseInt(b.slice(1)) - parseInt(a.slice(1)));
+      if (runs.length) {
+        document.getElementById('runs').innerHTML = runs
+          .map((n) => `<li><a href="${n}/">${n} <span>→</span></a></li>`).join('');
+      }
+    })
+    .catch(() => {});
+</script>
+</body>
+</html>
