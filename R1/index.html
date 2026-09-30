@@ -66,6 +66,21 @@
   .thumb img { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: cover; background: var(--line); }
   .thumb span { display: block; padding: 6px 8px; font-size: 12px; color: var(--muted); }
 
+  .section { margin-bottom: 16px; }
+  .tools { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .tools input { width: 110px; font: inherit; color: inherit; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 3px 6px; }
+  .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin: 4px 0 16px; }
+  .kpi { background: var(--bg); border-radius: 8px; padding: 12px 14px; }
+  .kpi b { display: block; font-size: 22px; font-variant-numeric: tabular-nums; }
+  #bandChart svg { display: block; width: 100%; height: auto; max-width: 760px; }
+  table.band { margin-top: 12px; }
+  table.band th { text-align: left; font-weight: 600; color: var(--muted); padding: 6px 12px 6px 0; }
+  table.band td { padding: 6px 12px 6px 0; }
+  table.band td:last-child, table.band td:nth-child(n+3), table.band th:nth-child(n+3) { text-align: right; }
+  table.band tr.total td { font-weight: 600; border-top: 2px solid var(--line); }
+  .band-scroll { overflow-x: auto; }
+  .note { font-size: 12px; margin: 10px 0 0; }
+
   dialog { border: 0; padding: 0; background: #000; max-width: 96vw; max-height: 96vh; }
   dialog img { display: block; max-width: 96vw; max-height: 96vh; }
   dialog::backdrop { background: rgba(0,0,0,.8); }
@@ -90,6 +105,24 @@
       <img id="main" alt="Geselecteerde variant">
       <div class="cap"><strong id="title"></strong><span class="muted">Klik op de afbeelding om te vergroten</span></div>
     </div>
+  </div>
+
+  <div class="card section" id="band" hidden>
+    <div class="pc-head">
+      <h2>Bandbreedte groen per knop</h2>
+      <span class="tools">
+        <label class="muted">Totaal plangebied <input id="area" type="number" min="0" step="1" placeholder="m²"> m²</label>
+        <button class="btn" id="dlSvg">Grafiek als SVG</button>
+        <button class="btn" id="dlPng">Grafiek als PNG</button>
+        <button class="btn" id="copyTable">Kopieer tabel</button>
+      </span>
+    </div>
+    <div class="kpis" id="kpis"></div>
+    <div id="bandChart"></div>
+    <div class="band-scroll"><table class="band" id="bandTable"></table></div>
+    <p class="muted note">Per knop: verschil in gemiddeld groen tussen de slechtste en de beste stand van die knop,
+      gemiddeld over alle combinaties van de andere knoppen. m² = procentpunten × totaal plangebied.
+      "Kopieer tabel" plakt als bewerkbare tabel in PowerPoint; de grafiek als SVG blijft scherp op elk formaat.</p>
   </div>
 
   <div class="card">
@@ -156,9 +189,12 @@
     d.uniq = [...new Set(vals)].sort((a, b) => a - b);
   }
 
-  const fmt = (d, v) => (d.cats ? d.cats[Math.round(v)] : d.pct ? +v.toFixed(1) + '%' : +v.toFixed(2) + '');
+  // Display-only renames; the CSV and the URL hash keep the raw values.
+  const VALUE_ALIAS = { Dijkzone: { '0': 'leeg' } };
+  const show = (d, raw) => (VALUE_ALIAS[d.name] && VALUE_ALIAS[d.name][raw]) || raw;
+  const fmt = (d, v) => (d.cats ? show(d, d.cats[Math.round(v)]) : d.pct ? +v.toFixed(1) + '%' : +v.toFixed(2) + '');
   const imgUrl = (r) => encodeURIComponent(r.img);
-  const label = (r) => inputs.map((d) => d.name + ' ' + r.raw[d.i]).join(' · ');
+  const label = (r) => inputs.map((d) => d.name + ' ' + show(d, r.raw[d.i])).join(' · ');
 
   // --- state ---------------------------------------------------------------
   let sel = rows[0];
@@ -191,7 +227,7 @@
     $('title').textContent = label(r);
     for (const d of inputs) {
       d.input.value = d.uniq.indexOf(r.num[d.i]);
-      d.output.textContent = r.raw[d.i];
+      d.output.textContent = show(d, r.raw[d.i]);
     }
     $('outputs').innerHTML = outs.map((d) => `<tr><td>${d.name}</td><td>${r.raw[d.i]}</td></tr>`).join('');
     paths.forEach((p, k) => p.classList.toggle('sel', k === r.idx));
@@ -335,6 +371,143 @@
     $('zoom').showModal();
   });
   $('zoom').addEventListener('click', () => $('zoom').close());
+
+  // --- bandbreedte groen -----------------------------------------------------
+  const KPI = 'Groen';
+  const LONG_NAME = { PNorm: 'Parkeernorm (%)', Kavel: 'Kavelverkleining (%)', Dijkzone: 'Bebouwing dijkzone' };
+  const LIGHT = { bg: '#ffffff', ink: '#1c2127', muted: '#5f6b76', bar: '#1f6feb', axis: '#c3c9d0' };
+  const kpi = outs.find((d) => d.name === KPI);
+  const run = location.pathname.split('/').filter(Boolean).pop() || 'run';
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const nl1 = (x) => x.toLocaleString('nl-NL', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+  const nl0 = (x) => Math.round(x).toLocaleString('nl-NL');
+  const DEFAULT_AREA = 330860; // totaal plangebied in m², ook zichtbaar in de renders van deze run
+  const areaKey = 'band-area:' + location.pathname;
+  let area = parseFloat(new URLSearchParams(location.search).get('opp'));
+  if (!(area > 0)) { try { area = parseFloat(localStorage.getItem(areaKey)); } catch (e) { area = NaN; } }
+  if (!(area > 0)) area = DEFAULT_AREA > 0 ? DEFAULT_AREA : null;
+  const m2 = (pp) => (area ? (pp * area) / 100 : null);
+
+  function bandItems() {
+    const mean = (d, v) => {
+      const xs = rows.filter((r) => r.num[d.i] === v).map((r) => r.num[kpi.i]);
+      return xs.reduce((a, b) => a + b, 0) / xs.length;
+    };
+    return inputs.map((d) => {
+      const ms = d.uniq.map((v) => ({ v, m: mean(d, v) }));
+      const lo = ms.reduce((a, b) => (b.m < a.m ? b : a));
+      const hi = ms.reduce((a, b) => (b.m > a.m ? b : a));
+      return { name: LONG_NAME[d.name] || d.name, from: fmt(d, lo.v), to: fmt(d, hi.v), pp: hi.m - lo.m };
+    }).sort((a, b) => b.pp - a.pp);
+  }
+
+  function bandSVG(items, pal) {
+    const W = 720, rowH = 50, top = 6, labW = 220, valW = 210;
+    const H = top + items.length * rowH + 6, bw = W - labW - valW;
+    const max = Math.max(...items.map((it) => it.pp)) || 1;
+    let s = `<svg xmlns="${NS}" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" font-family="Segoe UI, Arial, sans-serif">`;
+    if (pal.bg) s += `<rect width="${W}" height="${H}" fill="${pal.bg}"/>`;
+    items.forEach((it, k) => {
+      const y = top + k * rowH, w = Math.max(6, Math.round((it.pp / max) * bw * 10) / 10);
+      const val = '+' + nl1(it.pp) + ' pp' + (area ? '  ·  +' + nl0(m2(it.pp)) + ' m²' : '');
+      s += `<text x="0" y="${y + 20}" font-size="14" font-weight="600" fill="${pal.ink}">${esc(it.name)}</text>` +
+           `<text x="0" y="${y + 38}" font-size="12" fill="${pal.muted}">${esc(it.from)} → ${esc(it.to)}</text>` +
+           `<path d="M${labW},${y + 14}h${w - 4}a4,4 0 0 1 4,4v14a4,4 0 0 1 -4,4h${-(w - 4)}z" fill="${pal.bar}"/>` +
+           `<text x="${labW + w + 10}" y="${y + 30}" font-size="13" font-weight="600" fill="${pal.ink}">${esc(val)}</text>`;
+    });
+    s += `<line x1="${labW}" x2="${labW}" y1="${top}" y2="${H - 6}" stroke="${pal.axis}"/></svg>`;
+    return { s, W, H };
+  }
+
+  function bandTableHTML(items, inline) {
+    const span = kpi.max - kpi.min;
+    const st = inline ? { t: ' style="border-collapse:collapse;font-family:Segoe UI,Arial,sans-serif;font-size:14px"',
+      th: ' style="text-align:left;padding:6px 12px;border-bottom:2px solid #1c2127"',
+      td: ' style="padding:6px 12px;border-bottom:1px solid #dde2e7"', r: ';text-align:right',
+      tot: ' style="padding:6px 12px;font-weight:bold;border-top:2px solid #1c2127"' } : { t: '', th: '', td: '', r: '', tot: '' };
+    const cell = (tag, attr, v, right) => `<${tag}${right && inline ? attr.replace(/"$/, st.r + '"') : attr}>${esc(v)}</${tag}>`;
+    const head = ['Knop', 'Van → naar (meer groen)', 'Groen (pp)'].concat(area ? ['Groen (m²)'] : [], ['Aandeel in bandbreedte']);
+    let h = `<table${st.t}><thead><tr>` + head.map((x, k) => cell('th', st.th, x, k >= 2)).join('') + '</tr></thead><tbody>';
+    for (const it of items) {
+      const c = [it.name, it.from + ' → ' + it.to, '+' + nl1(it.pp)].concat(area ? ['+' + nl0(m2(it.pp))] : [], [Math.round((it.pp / span) * 100) + '%']);
+      h += '<tr>' + c.map((x, k) => cell('td', st.td, x, k >= 2)).join('') + '</tr>';
+    }
+    const t = ['Totale bandbreedte (alle varianten)', nl1(kpi.min) + '% → ' + nl1(kpi.max) + '%', '+' + nl1(span)]
+      .concat(area ? ['+' + nl0(m2(span))] : [], ['100%']);
+    h += '<tr class="total">' + t.map((x, k) => cell('td', st.tot, x, k >= 2)).join('') + '</tr></tbody></table>';
+    return h;
+  }
+
+  function renderBand() {
+    if (!kpi || !inputs.length) return;
+    $('band').hidden = false;
+    const items = bandItems();
+    const kp = (lbl, pct) => `<div class="kpi"><span class="muted">${lbl}</span><b>${nl1(pct)}%</b>` +
+      `<span class="muted">${area ? nl0(m2(pct)) + ' m²' : '&nbsp;'}</span></div>`;
+    const span = kpi.max - kpi.min;
+    $('kpis').innerHTML = kp(KPI + ', laagste variant', kpi.min) + kp(KPI + ', hoogste variant', kpi.max) +
+      `<div class="kpi"><span class="muted">Maximale winst</span><b>+${nl1(span)} pp</b>` +
+      `<span class="muted">${area ? '+' + nl0(m2(span)) + ' m²' : '&nbsp;'}</span></div>`;
+    const cs = getComputedStyle(document.documentElement), v = (n) => cs.getPropertyValue(n).trim();
+    $('bandChart').innerHTML = bandSVG(items, { ink: v('--ink'), muted: v('--muted'), bar: v('--accent'), axis: v('--line') }).s;
+    $('bandTable').innerHTML = bandTableHTML(items, false).replace(/^<table>|<\/table>$/g, '');
+  }
+
+  function download(blob, name) {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  }
+  const flash = (btn, msg) => { const o = btn.textContent; btn.textContent = msg; setTimeout(() => (btn.textContent = o), 1500); };
+
+  $('dlSvg').addEventListener('click', () => {
+    download(new Blob([bandSVG(bandItems(), LIGHT).s], { type: 'image/svg+xml' }), `bandbreedte-groen-${run}.svg`);
+  });
+  $('dlPng').addEventListener('click', () => {
+    const { s, W, H } = bandSVG(bandItems(), LIGHT), scale = 3, img = new Image();
+    img.onload = () => {
+      const c = document.createElement('canvas');
+      c.width = W * scale; c.height = H * scale;
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+      c.toBlob((b) => download(b, `bandbreedte-groen-${run}.png`), 'image/png');
+    };
+    img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(s);
+  });
+  $('copyTable').addEventListener('click', async (ev) => {
+    const btn = ev.currentTarget; // currentTarget is null after the await
+    const html = bandTableHTML(bandItems(), true);
+    const tmp = document.createElement('div');
+    tmp.innerHTML = html;
+    const plain = [...tmp.querySelectorAll('tr')].map((tr) => [...tr.children].map((c) => c.textContent).join('\t')).join('\n');
+    try {
+      await navigator.clipboard.write([new ClipboardItem({
+        'text/html': new Blob([html], { type: 'text/html' }),
+        'text/plain': new Blob([plain], { type: 'text/plain' }),
+      })]);
+    } catch (e) {
+      tmp.style.cssText = 'position:absolute;left:-9999px';
+      document.body.appendChild(tmp);
+      const range = document.createRange();
+      range.selectNodeContents(tmp);
+      getSelection().removeAllRanges();
+      getSelection().addRange(range);
+      document.execCommand('copy');
+      getSelection().removeAllRanges();
+      tmp.remove();
+    }
+    flash(btn, 'Gekopieerd ✓');
+  });
+  if (area) $('area').value = area;
+  $('area').addEventListener('input', () => {
+    area = parseFloat($('area').value) > 0 ? parseFloat($('area').value) : null;
+    try { area ? localStorage.setItem(areaKey, area) : localStorage.removeItem(areaKey); } catch (e) {}
+    renderBand();
+  });
+  renderBand();
 
   // --- start: restore selection from URL hash --------------------------------
   const params = new URLSearchParams(location.hash.slice(1));
