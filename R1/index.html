@@ -7,12 +7,12 @@
 <style>
   :root {
     --bg: #f4f5f7; --panel: #ffffff; --ink: #1c2127; --muted: #5f6b76;
-    --line: #dde2e7; --accent: #1f6feb; --dim: #cfd6dd; --sel: #e8590c; --accent2: #eb6834;
+    --line: #dde2e7; --accent: #1f6feb; --dim: #cfd6dd; --sel: #e8590c; --accent2: #eb6834; --accent3: #6250d6;
   }
   @media (prefers-color-scheme: dark) {
     :root {
       --bg: #111418; --panel: #1a1f25; --ink: #e6edf3; --muted: #9aa7b3;
-      --line: #2d343c; --accent: #58a6ff; --dim: #353d46; --sel: #ff8a3d; --accent2: #d95926;
+      --line: #2d343c; --accent: #58a6ff; --dim: #353d46; --sel: #ff8a3d; --accent2: #d95926; --accent3: #9085e9;
     }
   }
   * { box-sizing: border-box; }
@@ -51,6 +51,7 @@
   #pc { display: block; min-width: 900px; width: 100%; height: 340px; user-select: none; touch-action: none; }
   #pc .ln { fill: none; stroke: var(--accent); stroke-width: 1.2; stroke-opacity: .35; }
   #pc .ln.off { stroke: var(--dim); stroke-opacity: .5; }
+  #pc .ln.hl2 { stroke: var(--accent3); stroke-width: 2; stroke-opacity: .9; }
   #pc .ln.hl { stroke: var(--accent2); stroke-width: 2; stroke-opacity: .9; }
   #pc .ln.sel { stroke: var(--sel); stroke-width: 3; stroke-opacity: 1; }
   #pc .axis { stroke: var(--muted); stroke-width: 1; }
@@ -85,7 +86,10 @@
   table.band tr.total td { font-weight: 600; border-top: 2px solid var(--line); }
   .band-scroll { overflow-x: auto; }
   .note { font-size: 12px; margin: 10px 0 0; }
-  .hl-info { color: var(--accent2); font-weight: 600; }
+  .hl-info { color: var(--accent2); font-weight: 600; font-size: 13px; text-transform: none; letter-spacing: normal; }
+  .hl-info .dot { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin: 0 4px 0 6px; vertical-align: -1px; }
+  .hl-info .dot.a { background: var(--accent3); }
+  .hl-info .dot.b { background: var(--accent2); }
   table.band tr[data-hl]:hover td { background: var(--bg); }
   .band-chart g[data-hl]:hover .hl-bg { fill: var(--bg); }
   /* While an insight section is open the variant chart sticks to the top, so hovering a row shows its lines. */
@@ -302,24 +306,37 @@
     applyHighlight();
   }
 
-  // Lines matching the hovered insight row/bar are drawn on top in the second colour; the rest stays as it is.
-  let hl = null; // { key, pred, label } or null
+  // Lines matching the hovered insight row/bar are drawn on top; the rest stays as it is. A 'pair' (groen bridge)
+  // marks two bundles: the starting setting in the third colour (hl2) and the end setting in the second (hl).
+  let hl = null; // { key, label, pred, pred2?, a?, b? } or null
   function applyHighlight() {
-    const on = hl ? rows.filter(hl.pred) : [];
-    paths.forEach((p, k) => p.classList.toggle('hl', !!hl && hl.pred(rows[k])));
-    for (const r of on) paths[r.idx].parentNode.appendChild(paths[r.idx]);
+    const on = hl ? rows.filter(hl.pred) : [], on2 = hl && hl.pred2 ? rows.filter(hl.pred2) : [];
+    paths.forEach((p, k) => {
+      p.classList.toggle('hl', !!hl && hl.pred(rows[k]));
+      p.classList.toggle('hl2', !!(hl && hl.pred2) && hl.pred2(rows[k]));
+    });
+    for (const r of on2.concat(on)) paths[r.idx].parentNode.appendChild(paths[r.idx]);
     if (hl && paths[sel.idx]) paths[sel.idx].parentNode.appendChild(paths[sel.idx]); // selection stays on top
-    $('hlInfo').textContent = hl ? '· ' + hl.label + ' (' + on.length + ' varianten)' : '';
+    const info = $('hlInfo');
+    if (!hl) info.textContent = '';
+    else if (hl.pred2) {
+      info.innerHTML = '· ' + esc(hl.label) + ':<span class="dot a"></span>' + esc(hl.a) + ' (' + on2.length + ') →' +
+        '<span class="dot b"></span>' + esc(hl.b) + ' (' + on.length + ')';
+    } else info.textContent = '· ' + hl.label + ' (' + on.length + (on.length === 1 ? ' variant)' : ' varianten)');
   }
-  // data-hl = "colIndex|eq|value" or "colIndex|ne|value", written by the insight views.
+  // data-hl = "col|eq|value", "col|ne|value" or "col|pair|from|to", written by the insight views.
   function setHighlight(el) {
     const key = el ? el.getAttribute('data-hl') : null;
     if (key === (hl && hl.key)) return;
     if (!key) hl = null;
     else {
-      const [i, op, v] = key.split('|'), ci = +i, cv = +v;
-      hl = { key, label: el.getAttribute('data-hl-label'),
-             pred: op === 'eq' ? (r) => r.num[ci] === cv : (r) => r.num[ci] !== cv };
+      const [i, op, v, w] = key.split('|'), ci = +i, cv = +v, cw = +w, label = el.getAttribute('data-hl-label');
+      if (op === 'pair') {
+        hl = { key, label, a: el.getAttribute('data-hl-a'), b: el.getAttribute('data-hl-b'),
+               pred2: (r) => r.num[ci] === cv, pred: (r) => r.num[ci] === cw };
+      } else {
+        hl = { key, label, pred: op === 'eq' ? (r) => r.num[ci] === cv : (r) => r.num[ci] !== cv };
+      }
     }
     applyHighlight();
   }
@@ -409,8 +426,10 @@
   // 'scenarios': per setting of one input, the outputs and their range over a second input.
   const BANDS = [
     { key: 'groen', title: 'Bandbreedte inzichten groen', kpis: ['Groen'], area: true,
-      note: 'Per knop: verschil in gemiddeld groen tussen de laagste en de hoogste stand van die knop, gemiddeld over ' +
-            'alle combinaties van de andere knoppen. m² = procentpunten × totaal plangebied.' },
+      note: 'Brug van de laagste naar de hoogste variant. Per knop: verschil in gemiddeld groen tussen de laagste en de ' +
+            'hoogste stand, gemiddeld over alle combinaties van de andere knoppen; de bijdragen tellen op omdat de knoppen ' +
+            'elkaar hier niet beïnvloeden. Beweeg over een knop om in "Alle varianten" beide standen te zien. ' +
+            'm² = procentpunten × totaal plangebied.' },
     { key: 'parkeren', title: 'Bandbreedte inzichten parkeren', kpis: ['PP Vergroend', 'PP Tekort'], view: 'steps',
       by: 'PNorm', descending: true, extra: 'Groen' },
     { key: 'woningen', title: 'Bandbreedte inzichten woningen', kpis: ['Dijkzone Appt', 'Dijkzone PP'], view: 'scenarios',
@@ -457,14 +476,11 @@
 
   // Hover target attributes for one insight row; '' for exports (pal.bg set / inline table) and rows without effect.
   const hlAttr = (spec, onScreen) => (onScreen && spec
-    ? ` data-hl="${spec.i}|${spec.op}|${spec.v}" data-hl-label="${esc(spec.label)}"` : '');
+    ? ` data-hl="${spec.i}|${spec.op}|${spec.v}" data-hl-label="${esc(spec.label)}"` +
+      (spec.a != null ? ` data-hl-a="${esc(spec.a)}" data-hl-b="${esc(spec.b)}"` : '') : '');
   const hlRow = (y, W, h, onScreen) => (onScreen ? `<rect class="hl-bg" x="0" y="${y}" width="${W}" height="${h}" rx="6" fill="transparent"/>` : '');
-  // Everything but the starting setting: "Kavelverkleining 5–50", or "… alles behalve Vrije Sector 5v".
-  function notSpec(d, v, name) {
-    const rest = d.uniq.filter((x) => x !== v);
-    const what = d.cats ? 'alles behalve ' + fmt(d, v) : fmt(d, Math.min(...rest)) + '–' + fmt(d, Math.max(...rest));
-    return { i: d.i, op: 'ne', v, label: name + ' ' + what };
-  }
+  // The two ends of a band as bundles: the starting setting vs the end setting (e.g. Kavelverkleining 0 vs 50).
+  const pairSpec = (d, from, to, name) => ({ i: d.i, op: 'pair', v: from + '|' + to, label: name, a: fmt(d, from), b: fmt(d, to) });
 
   // Inline styles only for the clipboard copy, so PowerPoint keeps the formatting; on the page CSS does it.
   function tableKit(inline, firstNum) {
@@ -491,8 +507,48 @@
       const hi = nearest(highest, ms.indexOf(lo));
       const name = LONG_NAME[d.name] || d.name;
       return { name, from: fmt(d, lo.v), to: fmt(d, hi.v), lo: lo.m, hi: hi.m, span: hi.m - lo.m,
-               spec: hi.m - lo.m > 0 ? notSpec(d, lo.v, name.replace(/ \(%\)$/, '')) : null };
+               spec: hi.m - lo.m > 0 ? pairSpec(d, lo.v, hi.v, name.replace(/ \(%\)$/, '')) : null };
     }).sort((a, b) => b.span - a.span);
+  }
+
+  // Bridge from the lowest to the highest variant: one floating bar per knob, largest first. Honest here because the
+  // knobs' effects add up in this data (no interaction); the end marker is the real maximum, not the sum.
+  function waterfallSVG(k, pal) {
+    const items = bandItems(k), span = k.max - k.min, sum = items.reduce((a, it) => a + it.span, 0);
+    const W = 720, rowH = 46, labW = 230, valW = 200, bw = W - labW - valW;
+    const lo = k.min, hi = Math.max(k.max, k.min + sum);
+    const x = (v) => +(labW + ((v - lo) / (hi - lo || 1)) * bw).toFixed(1);
+    const share = (v) => (span ? Math.round((v / span) * 100) : 0) + '%';
+    const on = !pal.bg;
+    let y = 6, body = '';
+    const marker = (v, spec, title, sub) => {
+      body += `<g${hlAttr(spec, on)}>` + hlRow(y + 2, W, rowH - 4, on) +
+        txt(0, y + 19, 14, pal.ink, title, true) + txt(0, y + 36, 12, pal.muted, sub) +
+        `<rect x="${x(v) - 2}" y="${y + 8}" width="4" height="26" rx="1" fill="${pal.ink}"/>` +
+        txt(x(v) + 10, y + 26, 13, pal.ink, nl1(v) + '%' + (area ? ' · ' + nl0(m2(v)) + ' m²' : ''), true) + '</g>';
+      y += rowH;
+    };
+    marker(lo, { i: k.i, op: 'eq', v: k.min, label: 'Laagste variant' }, 'Laagste variant', 'elke knop op zijn slechtste stand');
+    let cum = lo;
+    for (const it of items) {
+      const x0 = x(cum), x1 = x(cum + it.span);
+      body += `<line x1="${x0}" x2="${x0}" y1="${y - rowH + 34}" y2="${y + 11}" stroke="${pal.axis}" stroke-dasharray="3 3"/>`;
+      body += `<g${hlAttr(it.spec, on)}>` + hlRow(y + 2, W, rowH - 4, on && it.spec) +
+        txt(0, y + 19, 14, pal.ink, it.name, true) + txt(0, y + 36, 12, pal.muted, it.span > 0 ? it.from + ' → ' + it.to : '');
+      if (it.span > 0) {
+        const w = Math.max(3, x1 - x0);
+        body += `<rect x="${x0}" y="${y + 11}" width="${+w.toFixed(1)}" height="22" rx="3" fill="${pal.bar}"/>` +
+          txt(+(x0 + w + 10).toFixed(1), y + 27, 13, pal.ink, amount(k, it.span) + '  (' + share(it.span) + ')', true);
+      } else {
+        body += txt(x0 + 10, y + 27, 13, pal.muted, 'geen effect', true);
+      }
+      body += '</g>';
+      cum += it.span;
+      y += rowH;
+    }
+    body += `<line x1="${x(cum)}" x2="${x(cum)}" y1="${y - rowH + 34}" y2="${y + 8}" stroke="${pal.axis}" stroke-dasharray="3 3"/>`;
+    marker(k.max, { i: k.i, op: 'eq', v: k.max, label: 'Hoogste variant' }, 'Hoogste variant', 'elke knop op zijn beste stand');
+    return { s: svgWrap(W, y + 4, pal, body), W, H: y + 4 };
   }
 
   const bandView = {
@@ -501,6 +557,7 @@
       return best.span > 0 ? 'Grootste knop: ' + best.name + ' ' + amount(k, best.span) : '';
     },
     chart(b, ks, pal) {
+      if (ks.length === 1 && ks[0].pct) return waterfallSVG(ks[0], pal);
       const W = 720, rowH = 50, labW = 220, valW = 210, bw = W - labW - valW;
       const groups = ks.map((k) => ({ k, items: bandItems(k) })), multi = groups.length > 1;
       const max = Math.max(...groups.flatMap((g) => g.items.map((it) => it.span))) || 1;
