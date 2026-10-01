@@ -316,7 +316,10 @@
       p.classList.toggle('hl2', !!(hl && hl.pred2) && hl.pred2(rows[k]));
     });
     for (const r of on2.concat(on)) paths[r.idx].parentNode.appendChild(paths[r.idx]);
-    if (hl && paths[sel.idx]) paths[sel.idx].parentNode.appendChild(paths[sel.idx]); // selection stays on top
+    // While an insight is hovered the selected variant is drawn like the rest, so only the insight's lines stand out;
+    // afterwards its thick line comes back on top.
+    const sp = paths[sel.idx];
+    if (sp) { sp.classList.toggle('sel', !hl); if (!hl) sp.parentNode.appendChild(sp); }
     const info = $('hlInfo');
     if (!hl) info.textContent = '';
     else if (hl.pred2) {
