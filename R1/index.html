@@ -51,6 +51,7 @@
   #pc { display: block; min-width: 900px; width: 100%; height: 340px; user-select: none; touch-action: none; }
   #pc .ln { fill: none; stroke: var(--accent); stroke-width: 1.2; stroke-opacity: .35; }
   #pc .ln.off { stroke: var(--dim); stroke-opacity: .5; }
+  #pc .ln.hl { stroke: var(--accent2); stroke-width: 2; stroke-opacity: .9; }
   #pc .ln.sel { stroke: var(--sel); stroke-width: 3; stroke-opacity: 1; }
   #pc .axis { stroke: var(--muted); stroke-width: 1; }
   #pc text { fill: var(--ink); font-size: 11px; }
@@ -84,6 +85,14 @@
   table.band tr.total td { font-weight: 600; border-top: 2px solid var(--line); }
   .band-scroll { overflow-x: auto; }
   .note { font-size: 12px; margin: 10px 0 0; }
+  .hl-info { color: var(--accent2); font-weight: 600; }
+  table.band tr[data-hl]:hover td { background: var(--bg); }
+  .band-chart g[data-hl]:hover .hl-bg { fill: var(--bg); }
+  /* While an insight section is open the variant chart sticks to the top, so hovering a row shows its lines. */
+  @media (min-width: 861px) {
+    .pc-card.sticky { position: sticky; top: 0; z-index: 5; box-shadow: 0 8px 18px rgba(0, 0, 0, .18); }
+    .pc-card.sticky #pc { height: 240px; }
+  }
   .band-sec { padding: 0; }
   .band-sec > summary { list-style: none; cursor: pointer; padding: 14px 16px; display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
   .band-sec > summary::-webkit-details-marker { display: none; }
@@ -122,16 +131,16 @@
     </div>
   </div>
 
-  <div id="bands"></div>
-
-  <div class="card">
+  <div class="card section pc-card" id="pcCard">
     <div class="pc-head">
-      <h2>Alle varianten</h2>
+      <h2>Alle varianten <span class="hl-info" id="hlInfo"></span></h2>
       <span class="muted">Sleep verticaal over een as om te filteren · sleep het filter om het te verschuiven · klik om te wissen
         <button class="btn" id="reset">Wis filters</button></span>
     </div>
     <div class="pc-scroll"><svg id="pc"></svg></div>
   </div>
+
+  <div id="bands"></div>
 
   <div class="grid" id="grid"></div>
 </div>
@@ -290,6 +299,29 @@
     });
     applyFilter();
     select(sel);
+    applyHighlight();
+  }
+
+  // Lines matching the hovered insight row/bar are drawn on top in the second colour; the rest stays as it is.
+  let hl = null; // { key, pred, label } or null
+  function applyHighlight() {
+    const on = hl ? rows.filter(hl.pred) : [];
+    paths.forEach((p, k) => p.classList.toggle('hl', !!hl && hl.pred(rows[k])));
+    for (const r of on) paths[r.idx].parentNode.appendChild(paths[r.idx]);
+    if (hl && paths[sel.idx]) paths[sel.idx].parentNode.appendChild(paths[sel.idx]); // selection stays on top
+    $('hlInfo').textContent = hl ? '· ' + hl.label + ' (' + on.length + ' varianten)' : '';
+  }
+  // data-hl = "colIndex|eq|value" or "colIndex|ne|value", written by the insight views.
+  function setHighlight(el) {
+    const key = el ? el.getAttribute('data-hl') : null;
+    if (key === (hl && hl.key)) return;
+    if (!key) hl = null;
+    else {
+      const [i, op, v] = key.split('|'), ci = +i, cv = +v;
+      hl = { key, label: el.getAttribute('data-hl-label'),
+             pred: op === 'eq' ? (r) => r.num[ci] === cv : (r) => r.num[ci] !== cv };
+    }
+    applyHighlight();
   }
 
   function svgY(ev) {
@@ -423,6 +455,17 @@
   const legend = (pal, entries) => entries.map(([color, label], j) =>
     `<rect x="${j * 300}" y="4" width="12" height="12" rx="2" fill="${color}"/>` + txt(j * 300 + 18, 14, 12, pal.muted, label)).join('');
 
+  // Hover target attributes for one insight row; '' for exports (pal.bg set / inline table) and rows without effect.
+  const hlAttr = (spec, onScreen) => (onScreen && spec
+    ? ` data-hl="${spec.i}|${spec.op}|${spec.v}" data-hl-label="${esc(spec.label)}"` : '');
+  const hlRow = (y, W, h, onScreen) => (onScreen ? `<rect class="hl-bg" x="0" y="${y}" width="${W}" height="${h}" rx="6" fill="transparent"/>` : '');
+  // Everything but the starting setting: "Kavelverkleining 5–50", or "… alles behalve Vrije Sector 5v".
+  function notSpec(d, v, name) {
+    const rest = d.uniq.filter((x) => x !== v);
+    const what = d.cats ? 'alles behalve ' + fmt(d, v) : fmt(d, Math.min(...rest)) + '–' + fmt(d, Math.max(...rest));
+    return { i: d.i, op: 'ne', v, label: name + ' ' + what };
+  }
+
   // Inline styles only for the clipboard copy, so PowerPoint keeps the formatting; on the page CSS does it.
   function tableKit(inline, firstNum) {
     const st = inline ? { t: ' style="border-collapse:collapse;font-family:Segoe UI,Arial,sans-serif;font-size:14px"',
@@ -431,7 +474,7 @@
       tot: ' style="text-align:left;padding:6px 12px;font-weight:bold;border-top:2px solid #1c2127;border-bottom:1px solid #dde2e7"' }
       : { t: '', th: '', td: '', tot: '' };
     const cell = (tag, attr, v, right) => `<${tag}${right && inline ? attr.replace('text-align:left', 'text-align:right') : attr}>${esc(v)}</${tag}>`;
-    const row = (tag, attr, cells, cls) => `<tr${cls ? ` class="${cls}"` : ''}>` + cells.map((x, j) => cell(tag, attr, x, j >= firstNum)).join('') + '</tr>';
+    const row = (tag, attr, cells, cls, extra) => `<tr${cls ? ` class="${cls}"` : ''}${extra || ''}>` + cells.map((x, j) => cell(tag, attr, x, j >= firstNum)).join('') + '</tr>';
     return { st, row, open: (head) => `<table${st.t}><thead>` + row('th', st.th, head) + '</thead><tbody>', close: '</tbody></table>' };
   }
 
@@ -446,7 +489,9 @@
       const hi0 = ms.find((x) => x.m === highest);
       const lo = nearest(lowest, ms.indexOf(hi0));
       const hi = nearest(highest, ms.indexOf(lo));
-      return { name: LONG_NAME[d.name] || d.name, from: fmt(d, lo.v), to: fmt(d, hi.v), lo: lo.m, hi: hi.m, span: hi.m - lo.m };
+      const name = LONG_NAME[d.name] || d.name;
+      return { name, from: fmt(d, lo.v), to: fmt(d, hi.v), lo: lo.m, hi: hi.m, span: hi.m - lo.m,
+               spec: hi.m - lo.m > 0 ? notSpec(d, lo.v, name.replace(/ \(%\)$/, '')) : null };
     }).sort((a, b) => b.span - a.span);
   }
 
@@ -465,9 +510,9 @@
         const y0 = y;
         for (const it of g.items) {
           const w = it.span > 0 ? Math.max(6, Math.round((it.span / max) * bw * 10) / 10) : 0;
-          body += txt(0, y + 20, 14, pal.ink, it.name, true) + txt(0, y + 38, 12, pal.muted, it.span > 0 ? it.from + ' → ' + it.to : '');
+          body += `<g${hlAttr(it.spec, !pal.bg)}>` + hlRow(y + 2, W, rowH - 4, !pal.bg && it.spec) + txt(0, y + 20, 14, pal.ink, it.name, true) + txt(0, y + 38, 12, pal.muted, it.span > 0 ? it.from + ' → ' + it.to : '');
           if (w) body += barPath(labW, y + 14, w, 22, pal.bar);
-          body += txt(labW + w + 10, y + 30, 13, it.span > 0 ? pal.ink : pal.muted, it.span > 0 ? amount(g.k, it.span) : 'geen effect', true);
+          body += txt(labW + w + 10, y + 30, 13, it.span > 0 ? pal.ink : pal.muted, it.span > 0 ? amount(g.k, it.span) : 'geen effect', true) + '</g>';
           y += rowH;
         }
         body += `<line x1="${labW}" x2="${labW}" y1="${y0}" y2="${y - 6}" stroke="${pal.axis}"/>`;
@@ -481,7 +526,7 @@
         .concat(area ? [kname(k) + ' (m²)'] : [], ['Aandeel in bandbreedte']));
       for (const it of bandItems(k)) {
         h += row('td', st.td, [it.name, it.from + ' → ' + it.to, '+' + nl1(it.span)]
-          .concat(area ? ['+' + nl0(m2(it.span))] : [], [(span ? Math.round((it.span / span) * 100) : 0) + '%']));
+          .concat(area ? ['+' + nl0(m2(it.span))] : [], [(span ? Math.round((it.span / span) * 100) : 0) + '%']), '', hlAttr(it.spec, !inline));
       }
       h += row('td', st.tot, ['Totale bandbreedte (alle varianten)', nl1(k.min) + '% → ' + nl1(k.max) + '%', '+' + nl1(span)]
         .concat(area ? ['+' + nl0(m2(span))] : [], ['100%']), 'total');
@@ -495,8 +540,10 @@
     const d = col(b.by), g = b.extra && col(b.extra);
     const lv = b.descending ? [...d.uniq].reverse() : d.uniq;
     const at = (k, v) => meanWhere(k, [d, v]);
+    const name = (LONG_NAME[d.name] || d.name).replace(/ \(%\)$/, '');
     return lv.map((v, j) => ({
       label: fmt(d, v) + (d.name === 'PNorm' ? '%' : ''),
+      spec: { i: d.i, op: 'eq', v, label: name + ' ' + fmt(d, v) + (d.name === 'PNorm' ? '%' : '') },
       vals: ks.map((k) => at(k, v)),
       step: j ? at(ks[0], v) - at(ks[0], lv[j - 1]) : null,
       g: g ? at(g, v) - at(g, lv[0]) : null, // gain relative to the first setting
@@ -518,7 +565,8 @@
       let y = top, body = legend(pal, [[pal.bar, kname(ks[0])], [pal.bar2, kname(ks[1])]]);
       for (const s of st) {
         const sub = s.g ? sgn(s.g, nl1) + ' pp groen' + (area ? ' · ' + sgn(m2(s.g), nl0) + ' m²' : '') : 'uitgangssituatie';
-        body += txt(0, y + 18, 14, pal.ink, name + ' ' + s.label, true) + txt(0, y + 36, 12, pal.muted, sub);
+        body += `<g${hlAttr(s.spec, !pal.bg)}>` + hlRow(y - 2, W, rowH - 4, !pal.bg) +
+                txt(0, y + 18, 14, pal.ink, name + ' ' + s.label, true) + txt(0, y + 36, 12, pal.muted, sub);
         const w = len(s.vals[0]);
         if (w) body += barPath(labW, y + 6, w, 18, pal.bar);
         body += txt(labW + w + 8, y + 20, 13, s.vals[0] > 0 ? pal.ink : pal.muted, nl0(s.vals[0]) + ' ' + kname(ks[0]), true);
@@ -526,6 +574,7 @@
           const w2 = len(s.vals[1]);
           body += barPath(labW, y + 30, w2, 14, pal.bar2) + txt(labW + w2 + 8, y + 42, 13, pal.ink, nl0(s.vals[1]) + ' ' + kname(ks[1]), true);
         }
+        body += '</g>';
         y += rowH;
       }
       body += `<line x1="${labW}" x2="${labW}" y1="${top}" y2="${y - 8}" stroke="${pal.axis}"/>`;
@@ -538,7 +587,8 @@
       for (const s of st) {
         const perPP = s.vals[0] - st[0].vals[0];
         h += row('td', sty.td, [s.label, nl0(s.vals[0]), s.step === null ? '–' : sgn(s.step, nl0), nl0(s.vals[1])]
-          .concat(g ? [s.g ? sgn(s.g, nl1) : '–'] : [], g && area ? [s.g ? sgn(m2(s.g), nl0) : '–', perPP ? nl1(m2(s.g) / perPP) : '–'] : []));
+          .concat(g ? [s.g ? sgn(s.g, nl1) : '–'] : [], g && area ? [s.g ? sgn(m2(s.g), nl0) : '–', perPP ? nl1(m2(s.g) / perPP) : '–'] : []),
+          '', hlAttr(s.spec, !inline));
       }
       return h + close;
     },
@@ -549,6 +599,7 @@
     const d = col(b.by), vd = col(b.vary), vlo = vd.uniq[0], vhi = vd.uniq[vd.uniq.length - 1];
     return d.uniq.map((v) => ({
       name: fmt(d, v),
+      spec: { i: d.i, op: 'eq', v, label: (LONG_NAME[d.name] || d.name) + ': ' + fmt(d, v) },
       homes: meanWhere(ks[0], [d, v]),
       ppLo: meanWhere(ks[1], [d, v], [vd, vlo]), ppHi: meanWhere(ks[1], [d, v], [vd, vhi]),
     })).concat().sort((a, c) => a.homes - c.homes || a.ppHi - c.ppHi);
@@ -569,7 +620,7 @@
       let y = top, body = legend(pal, [[pal.bar, 'Extra woningen'],
         [pal.bar2, `Extra parkeerplaatsen: ${vname} ${fmt(vd, vd.uniq[0])}% → ${fmt(vd, vd.uniq[vd.uniq.length - 1])}%`]]);
       for (const s of sc) {
-        body += txt(0, y + 26, 14, pal.ink, s.name, true);
+        body += `<g${hlAttr(s.spec, !pal.bg)}>` + hlRow(y, W, blockH - 6, !pal.bg) + txt(0, y + 26, 14, pal.ink, s.name, true);
         if (s.homes > 0) {
           const pp = s.ppHi / s.homes, pp0 = s.ppLo / s.homes;
           body += txt(0, y + 44, 12, pal.muted, nl1(pp0) + '–' + nl1(pp) + ' PP per woning');
@@ -582,6 +633,7 @@
         } else {
           body += txt(labW + 10, y + 30, 13, pal.muted, 'geen extra woningen of parkeerplaatsen');
         }
+        body += '</g>';
         y += blockH;
       }
       body += `<line x1="${labW}" x2="${labW}" y1="${top}" y2="${y - 8}" stroke="${pal.axis}"/>`;
@@ -594,7 +646,7 @@
         'Bandbreedte PP', 'PP per woning']);
       for (const s of sc) {
         h += row('td', st.td, [s.name, nl0(s.homes), nl0(s.ppHi), nl0(s.ppLo), nl0(Math.abs(s.ppHi - s.ppLo)),
-          s.homes ? nl1(s.ppLo / s.homes) + '–' + nl1(s.ppHi / s.homes) : '–']);
+          s.homes ? nl1(s.ppLo / s.homes) + '–' + nl1(s.ppHi / s.homes) : '–'], '', hlAttr(s.spec, !inline));
       }
       return h + close;
     },
@@ -635,6 +687,16 @@
     flash(btn, 'Gekopieerd ✓');
   }
 
+  // The variant chart sticks to the top while any insight is open; its height changes, so redraw.
+  function updateSticky() {
+    const on = [...document.querySelectorAll('#bands details')].some((d) => d.open);
+    if ($('pcCard').classList.contains('sticky') === on) return;
+    $('pcCard').classList.toggle('sticky', on);
+    draw();
+  }
+  $('bands').addEventListener('mouseover', (ev) => setHighlight(ev.target.closest('[data-hl]')));
+  $('bands').addEventListener('mouseleave', () => setHighlight(null));
+
   const renders = [];
   for (const b of BANDS) {
     const ks = b.kpis.map(col).filter(Boolean);
@@ -646,7 +708,10 @@
     sec.className = 'card section band-sec';
     const openKey = 'band-open:' + location.pathname + ':' + b.key;
     try { sec.open = localStorage.getItem(openKey) === '1'; } catch (e) {}
-    sec.addEventListener('toggle', () => { try { localStorage.setItem(openKey, sec.open ? '1' : '0'); } catch (e) {} });
+    sec.addEventListener('toggle', () => {
+      try { localStorage.setItem(openKey, sec.open ? '1' : '0'); } catch (e) {}
+      updateSticky();
+    });
     sec.innerHTML =
       `<summary><h2>${esc(b.title)}</h2><span class="muted headline" data-r="headline"></span></summary>` +
       '<div class="tools band-tools">' +
